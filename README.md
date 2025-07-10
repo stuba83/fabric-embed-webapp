@@ -1,17 +1,17 @@
-# PowerBI Embedded Web Application
+# Microsoft Fabric Embedded Web Application
 
-Una aplicación web moderna para embedar contenido de PowerBI con autenticación de Entra ID y control de acceso basado en roles.
+Una aplicación web moderna para embedar contenido de PowerBI usando Microsoft Fabric Capacity con autenticación de Entra ID y control de acceso basado en roles.
 
 ## 🎯 Descripción
 
-Esta solución implementa el patrón **"Embed for your customers"** de PowerBI, permitiendo que los usuarios accedan a reportes y dashboards sin necesidad de licencias individuales de PowerBI Pro. La aplicación utiliza autenticación de Entra ID con tres roles predefinidos y Row Level Security (RLS) para controlar el acceso a los datos.
+Esta solución implementa el patrón **"Embed for your customers"** de PowerBI utilizando **Microsoft Fabric Capacity**, permitiendo que los usuarios accedan a reportes y dashboards sin necesidad de licencias individuales de PowerBI Pro. La aplicación utiliza autenticación de Entra ID con tres roles predefinidos y Row Level Security (RLS) para controlar el acceso a los datos.
 
 ## 🏗️ Arquitectura
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │   Frontend      │    │     Backend      │    │   PowerBI       │
-│   (React)       │◄──►│   (Python)       │◄──►│   Embedded      │
+│   (React)       │◄──►│   (Python)       │◄──►│   + Fabric      │
 │                 │    │                  │    │                 │
 │ • MSAL Auth     │    │ • FastAPI        │    │ • Service       │
 │ • Role-based UI │    │ • Entra ID       │    │   Principal     │
@@ -24,7 +24,7 @@ Esta solución implementa el patrón **"Embed for your customers"** de PowerBI, 
                  │         Entra ID               │    │      Azure          │
                  │                                │    │                     │
                  │ • User Authentication          │    │ • App Services      │
-                 │ • Groups (Admin, RolA, RolB)   │    │ • Identity          │
+                 │ • Groups (Admin, RolA, RolB)   │    │ • Fabric Capacity   │
                  │ • Role Assignment              │    │ • Key Vault         │
                  └────────────────────────────────┘    └─────────────────────┘
 ```
@@ -42,7 +42,7 @@ Los filtros se aplican automáticamente en PowerBI basándose en los roles de En
 ## 🚀 Características
 
 - ✅ Autenticación con Entra ID (Azure AD)
-- ✅ Embed de PowerBI sin licencias individuales
+- ✅ Embed de PowerBI con Microsoft Fabric Capacity
 - ✅ Control de acceso basado en roles
 - ✅ Row Level Security (RLS)
 - ✅ Interfaz responsive con React
@@ -57,11 +57,11 @@ Los filtros se aplican automáticamente en PowerBI basándose en los roles de En
 |---------|------|---------------------|
 | App Service (Frontend) | B1 Linux | ~$12.50 |
 | App Service (Backend) | B1 Linux | ~$12.50 |
-| PowerBI Embedded | A1 SKU | ~$750.00 |
+| Microsoft Fabric Capacity | F8 SKU | ~$320.00 |
 | Entra ID | Básico | Gratis |
-| **Total** | | **~$775/mes** |
+| **Total** | | **~$345/mes** |
 
-> 💡 Los costos pueden variar según el uso real. PowerBI Embedded A1 puede pausarse cuando no se use.
+> 💡 Los costos pueden variar según el uso real. Microsoft Fabric F8 puede pausarse cuando no se use.
 
 ## ⏱️ Estimación de Desarrollo
 
@@ -70,7 +70,7 @@ Los filtros se aplican automáticamente en PowerBI basándose en los roles de En
 | Setup Azure + Entra ID | 4-6h |
 | Backend (Python/FastAPI) | 12-16h |
 | Frontend (React) | 16-20h |
-| PowerBI RLS + Service Principal | 6-8h |
+| Microsoft Fabric + Service Principal | 6-8h |
 | Deployment + Testing | 8-10h |
 | **Total** | **46-60h** |
 
@@ -79,6 +79,7 @@ Los filtros se aplican automáticamente en PowerBI basándose en los roles de En
 - Cuenta de Azure con permisos para crear recursos
 - Tenant de Entra ID configurado
 - Workspace de PowerBI con reportes/dashboards
+- Microsoft Fabric workspace configurado
 - Node.js 18+ y Python 3.9+
 - Docker (para desarrollo local)
 
@@ -123,7 +124,7 @@ cd frontend && npm run dev
 - [📖 Guía de Deployment](docs/deployment/azure-setup.md)
 - [🏗️ Arquitectura del Sistema](docs/architecture/system-architecture.md)
 - [🔐 Modelo de Seguridad](docs/architecture/security-model.md)
-- [⚙️ Configuración de PowerBI](docs/deployment/powerbi-configuration.md)
+- [⚙️ Configuración de Microsoft Fabric](docs/deployment/fabric-configuration.md)
 - [👥 Setup de Entra ID](docs/deployment/entra-id-setup.md)
 - [💻 Desarrollo Local](docs/deployment/local-development.md)
 
@@ -144,7 +145,7 @@ cd frontend && npm run dev
 ### Infraestructura
 - **Azure App Service** (Linux)
 - **Entra ID** para autenticación
-- **PowerBI Embedded** (A1 SKU)
+- **Microsoft Fabric Capacity** (F8 SKU)
 - **Azure Key Vault** para secrets
 - **GitHub Actions** para CI/CD
 
@@ -169,4 +170,4 @@ Para preguntas y soporte:
 
 ---
 
-**⚡ Developed with ❤️ for PowerBI Embedded**
+**⚡ Developed with ❤️ for Microsoft Fabric Embedded**
