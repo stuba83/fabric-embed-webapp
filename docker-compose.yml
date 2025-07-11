@@ -1,0 +1,186 @@
+# Microsoft Fabric Embedded App - Docker Compose Configuration
+# For local development environment
+
+version: '3.8'
+
+services:
+  # Backend API Service (Python FastAPI)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: fabric-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Environment
+      - ENVIRONMENT=development
+      - DEBUG=true
+      
+      # URLs
+      - FRONTEND_URL=http://localhost:5173
+      - BACKEND_URL=http://localhost:8000
+      
+      # Entra ID (from .env file)
+      - ENTRA_TENANT_ID=${ENTRA_TENANT_ID}
+      - ENTRA_CLIENT_ID=${BACKEND_CLIENT_ID}
+      - ENTRA_CLIENT_SECRET=${BACKEND_CLIENT_SECRET}
+      
+      # Microsoft Fabric
+      - FABRIC_WORKSPACE_ID=${FABRIC_WORKSPACE_ID}
+      - FABRIC_DATASET_ID=${FABRIC_DATASET_ID}
+      - FABRIC_REPORT_ID=${FABRIC_REPORT_ID}
+      
+      # Development overrides
+      - KEY_VAULT_URL=${KEY_VAULT_URL:-}
+      - LOG_LEVEL=DEBUG
+      
+      # CORS
+      - ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
+      
+    volumes:
+      - ./backend:/app
+      - backend_cache:/app/.cache
+    networks:
+      - fabric-network
+    depends_on:
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Frontend Service (React with Vite)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: fabric-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      # Vite environment variables
+      - VITE_ENTRA_CLIENT_ID=${FRONTEND_CLIENT_ID}
+      - VITE_ENTRA_AUTHORITY=https://login.microsoftonline.com/${ENTRA_TENANT_ID}
+      - VITE_API_BASE_URL=http://localhost:8000
+      - VITE_ENVIRONMENT=development
+      - VITE_DEBUG=true
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    networks:
+      - fabric-network
+    depends_on:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5173"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Redis for caching (optional but recommended)
+  redis:
+    image: redis:7-alpine
+    container_name: fabric-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - fabric-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+
+  # PostgreSQL Database (optional, for future features)
+  postgres:
+    image: postgres:15-alpine
+    container_name: fabric-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=fabric_app
+      - POSTGRES_USER=fabric_user
+      - POSTGRES_PASSWORD=fabric_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/sql:/docker-entrypoint-initdb.d
+    networks:
+      - fabric-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fabric_user -d fabric_app"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    profiles:
+      - database  # Only start if explicitly requested
+
+  # Nginx Reverse Proxy (for production-like setup)
+  nginx:
+    image: nginx:alpine
+    container_name: fabric-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    networks:
+      - fabric-network
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+    profiles:
+      - production  # Only for production-like testing
+
+# Networks
+networks:
+  fabric-network:
+    driver: bridge
+    name: fabric-embedded-network
+
+# Volumes
+volumes:
+  backend_cache:
+    driver: local
+  frontend_node_modules:
+    driver: local
+  redis_data:
+    driver: local
+  postgres_data:
+    driver: local
+
+# Development Override
+# Use: docker-compose -f docker-compose.yml -f docker-compose.override.yml up
+---
+# docker-compose.override.yml (for additional development settings)
+version: '3.8'
+
+services:
+  backend:
+    volumes:
+      - ./backend:/app:cached
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - WATCHDOG_ENABLED=true
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload --log-level debug
+
+  frontend:
+    volumes:
+      - ./frontend:/app:cached
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0 --port 5173

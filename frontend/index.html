@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+    <!-- Primary Meta Tags -->
+    <title>Microsoft Fabric Embedded App</title>
+    <meta name="title" content="Microsoft Fabric Embedded App" />
+    <meta name="description" content="Enterprise analytics platform with Microsoft Fabric, PowerBI embedding, and Entra ID authentication" />
+    <meta name="keywords" content="Microsoft Fabric, PowerBI, Analytics, Dashboard, Business Intelligence, Entra ID" />
+    <meta name="author" content="Microsoft Fabric Embedded Team" />
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
+    
+    <!-- Security -->
+    <meta http-equiv="Content-Security-Policy" content="
+      default-src 'self';
+      script-src 'self' 'unsafe-inline' 'unsafe-eval' 
+        https://login.microsoftonline.com 
+        https://alcdn.msauth.net 
+        https://alcdn.msftauth.net
+        https://cdn.jsdelivr.net;
+      style-src 'self' 'unsafe-inline' 
+        https://fonts.googleapis.com
+        https://cdn.jsdelivr.net;
+      font-src 'self' 
+        https://fonts.gstatic.com
+        https://cdn.jsdelivr.net;
+      img-src 'self' data: blob: 
+        https: 
+        https://login.microsoftonline.com;
+      connect-src 'self' 
+        https://login.microsoftonline.com 
+        https://graph.microsoft.com 
+        https://api.powerbi.com 
+        https://api.fabric.microsoft.com
+        https://analysis.windows.net
+        wss: ws:;
+      frame-src 'self' 
+        https://app.powerbi.com 
+        https://app.fabric.microsoft.com 
+        https://login.microsoftonline.com;
+      worker-src 'self' blob:;
+      object-src 'none';
+      base-uri 'self';
+      form-action 'self';
+      frame-ancestors 'none';
+    " />
+    <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+    <meta http-equiv="X-Frame-Options" content="DENY" />
+    <meta http-equiv="X-XSS-Protection" content="1; mode=block" />
+    <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin" />
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://your-app-domain.com/" />
+    <meta property="og:title" content="Microsoft Fabric Embedded App" />
+    <meta property="og:description" content="Enterprise analytics platform with Microsoft Fabric, PowerBI embedding, and Entra ID authentication" />
+    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:site_name" content="Microsoft Fabric Embedded" />
+    
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://your-app-domain.com/" />
+    <meta property="twitter:title" content="Microsoft Fabric Embedded App" />
+    <meta property="twitter:description" content="Enterprise analytics platform with Microsoft Fabric, PowerBI embedding, and Entra ID authentication" />
+    <meta property="twitter:image" content="/twitter-image.png" />
+    
+    <!-- Theme -->
+    <meta name="theme-color" content="#0078d4" />
+    <meta name="color-scheme" content="light dark" />
+    
+    <!-- Preconnect to external domains for performance -->
+    <link rel="preconnect" href="https://login.microsoftonline.com" />
+    <link rel="preconnect" href="https://graph.microsoft.com" />
+    <link rel="preconnect" href="https://api.powerbi.com" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    
+    <!-- DNS Prefetch -->
+    <link rel="dns-prefetch" href="https://app.powerbi.com" />
+    <link rel="dns-prefetch" href="https://app.fabric.microsoft.com" />
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    
+    <!-- Environment Variables (populated by Vite) -->
+    <script>
+      window.APP_CONFIG = {
+        version: '%VITE_APP_VERSION%',
+        environment: '%VITE_ENVIRONMENT%',
+        buildTime: '%VITE_BUILD_TIME%'
+      };
+    </script>
+    
+    <!-- Loading styles to prevent FOUC -->
+    <style>
+      /* Prevent flash of unstyled content */
+      .app-loading {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 9999;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }
+      
+      .loading-spinner {
+        width: 48px;
+        height: 48px;
+        border: 4px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        border-top-color: #ffffff;
+        animation: spin 1s ease-in-out infinite;
+        margin-bottom: 24px;
+      }
+      
+      .loading-text {
+        color: #ffffff;
+        font-size: 18px;
+        font-weight: 500;
+        text-align: center;
+        margin-bottom: 8px;
+      }
+      
+      .loading-subtext {
+        color: rgba(255, 255, 255, 0.8);
+        font-size: 14px;
+        text-align: center;
+      }
+      
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      
+      /* Hide loading when app is ready */
+      .app-ready .app-loading {
+        display: none;
+      }
+      
+      /* Base app styles */
+      html {
+        height: 100%;
+      }
+      
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        background-color: #f8fafc;
+        color: #1e293b;
+      }
+      
+      #root {
+        height: 100%;
+      }
+      
+      /* Accessibility improvements */
+      @media (prefers-reduced-motion: reduce) {
+        .loading-spinner {
+          animation: none;
+        }
+      }
+      
+      /* Dark mode support */
+      @media (prefers-color-scheme: dark) {
+        body {
+          background-color: #0f172a;
+          color: #f1f5f9;
+        }
+      }
+    </style>
+  </head>
+  
+  <body>
+    <!-- App container -->
+    <div id="root">
+      <!-- Loading screen -->
+      <div class="app-loading">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Microsoft Fabric Embedded</div>
+        <div class="loading-subtext">Loading your analytics dashboard...</div>
+      </div>
+    </div>
+    
+    <!-- Main application script -->
+    <script type="module" src="/src/main.jsx"></script>
+    
+    <!-- Error boundary fallback -->
+    <script>
+      // Global error handling
+      window.addEventListener('error', function(event) {
+        console.error('Global error:', event.error);
+        
+        // Report to monitoring service in production
+        if (window.APP_CONFIG && window.APP_CONFIG.environment === 'production') {
+          // Add error reporting logic here
+        }
+      });
+      
+      window.addEventListener('unhandledrejection', function(event) {
+        console.error('Unhandled promise rejection:', event.reason);
+        
+        // Report to monitoring service in production
+        if (window.APP_CONFIG && window.APP_CONFIG.environment === 'production') {
+          // Add error reporting logic here
+        }
+      });
+      
+      // Remove loading screen after timeout (fallback)
+      setTimeout(function() {
+        const loading = document.querySelector('.app-loading');
+        if (loading && loading.style.display !== 'none') {
+          loading.style.display = 'none';
+          console.warn('Loading screen removed by timeout - app may have failed to initialize');
+        }
+      }, 10000);
+    </script>
+    
+    <!-- Feature detection -->
+    <script>
+      // Check for required browser features
+      const requiredFeatures = [
+        'fetch',
+        'Promise',
+        'Map',
+        'Set',
+        'Symbol'
+      ];
+      
+      const missingFeatures = requiredFeatures.filter(feature => !(feature in window));
+      
+      if (missingFeatures.length > 0) {
+        document.getElementById('root').innerHTML = `
+          <div style="
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: system-ui, sans-serif;
+            text-align: center;
+            padding: 20px;
+            background: #f8fafc;
+          ">
+            <h1 style="color: #dc2626; margin-bottom: 16px;">Browser Not Supported</h1>
+            <p style="color: #64748b; margin-bottom: 24px; max-width: 500px;">
+              Your browser is missing required features: ${missingFeatures.join(', ')}
+            </p>
+            <p style="color: #64748b;">
+              Please update your browser or use a modern browser like Chrome, Firefox, Safari, or Edge.
+            </p>
+          </div>
+        `;
+      }
+    </script>
+    
+    <!-- No JavaScript fallback -->
+    <noscript>
+      <div style="
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        font-family: system-ui, sans-serif;
+        text-align: center;
+        padding: 20px;
+        background: #f8fafc;
+      ">
+        <h1 style="color: #dc2626; margin-bottom: 16px;">JavaScript Required</h1>
+        <p style="color: #64748b; margin-bottom: 24px;">
+          This application requires JavaScript to function properly.
+        </p>
+        <p style="color: #64748b;">
+          Please enable JavaScript in your browser settings and refresh the page.
+        </p>
+      </div>
+    </noscript>
+  </body>
+</html>
