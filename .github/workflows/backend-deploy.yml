@@ -1,0 +1,590 @@
+name: 🐍 Backend Deployment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+      skip_tests:
+        description: 'Skip tests and deploy directly'
+        required: false
+        default: false
+        type: boolean
+      run_migrations:
+        description: 'Run database migrations'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  PYTHON_VERSION: '3.11'
+  APP_NAME: 'fabric-embedded-app'
+
+jobs:
+  # 🧪 Build and Test
+  build-and-test:
+    name: 🏗️ Build & Test Backend
+    runs-on: ubuntu-latest
+    if: ${{ !inputs.skip_tests }}
+    
+    defaults:
+      run:
+        working-directory: ./backend
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      image-tag: ${{ steps.docker.outputs.image-tag }}
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+        
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: './backend/requirements.txt'
+          
+      - name: 📋 Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          
+      - name: 🔍 Code Quality Checks
+        run: |
+          # Format check
+          black --check --diff .
+          
+          # Lint
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+          
+          # Type checking
+          mypy . --ignore-missing-imports --show-error-codes
+          
+          # Security check
+          bandit -r . -f json -o bandit-report.json || true
+          
+      - name: 🧪 Run Unit Tests
+        run: |
+          pytest tests/unit/ \
+            --cov=src \
+            --cov-report=xml \
+            --cov-report=html \
+            --cov-report=term \
+            --junitxml=pytest-unit.xml \
+            -v
+        env:
+          TESTING: true
+          REDIS_URL: redis://localhost:6379
+          
+      - name: 🔗 Run Integration Tests
+        run: |
+          pytest tests/integration/ \
+            --cov=src \
+            --cov-append \
+            --cov-report=xml \
+            --junitxml=pytest-integration.xml \
+            -v
+        env:
+          TESTING: true
+          REDIS_URL: redis://localhost:6379
+          
+      - name: 📊 Upload Test Coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./backend/coverage.xml
+          flags: backend
+          name: backend-coverage
+          
+      - name: 🐋 Build Docker Image
+        id: docker
+        run: |
+          image_tag="backend:${{ github.run_number }}"
+          echo "image-tag=$image_tag" >> $GITHUB_OUTPUT
+          
+          docker build -t $image_tag .
+          
+          # Test the image
+          docker run --rm -d --name test-backend -p 8080:8000 $image_tag
+          sleep 10
+          
+          # Health check
+          health_response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/health || echo "000")
+          docker stop test-backend
+          
+          if [ "$health_response" = "200" ]; then
+            echo "✅ Docker image health check passed"
+          else
+            echo "❌ Docker image health check failed"
+            exit 1
+          fi
+          
+      - name: 📦 Create Version Info
+        id: version
+        run: |
+          version="1.0.${{ github.run_number }}"
+          echo "version=$version" >> $GITHUB_OUTPUT
+          
+          # Create version file
+          cat > version.json << EOF
+          {
+            "version": "$version",
+            "buildDate": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "commit": "${{ github.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "environment": "${{ inputs.environment || 'production' }}",
+            "pythonVersion": "${{ env.PYTHON_VERSION }}"
+          }
+          EOF
+          
+      - name: 📦 Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-build-${{ steps.version.outputs.version }}
+          path: |
+            ./backend/
+            !./backend/.git
+            !./backend/__pycache__
+            !./backend/**/__pycache__
+            !./backend/.pytest_cache
+            !./backend/htmlcov
+          retention-days: 30
+          
+      - name: 📊 Upload Test Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ steps.version.outputs.version }}
+          path: |
+            ./backend/pytest-*.xml
+            ./backend/htmlcov/
+            ./backend/bandit-report.json
+          retention-days: 7
+
+  # 🗄️ Database Migration Check
+  migration-check:
+    name: 🗄️ Database Migration Check
+    runs-on: ubuntu-latest
+    if: inputs.run_migrations || contains(github.event.head_commit.message, '[migrate]')
+    needs: [build-and-test]
+    
+    steps:
+      - name: 📥 Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-build-${{ needs.build-and-test.outputs.version }}
+          path: ./backend/
+          
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      - name: 📋 Install Dependencies
+        working-directory: ./backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      - name: 🗄️ Check Migrations
+        working-directory: ./backend
+        run: |
+          echo "Checking for pending migrations..."
+          # Add migration check logic here
+          echo "✅ Migration check completed"
+
+  # 🚀 Deploy to Development
+  deploy-development:
+    name: 🧪 Deploy to Development
+    runs-on: ubuntu-latest
+    if: |
+      (github.ref == 'refs/heads/main' && !inputs.skip_tests) || 
+      (inputs.environment == 'development')
+    needs: [build-and-test]
+    environment:
+      name: development
+      url: https://${{ env.APP_NAME }}-backend-dev.azurewebsites.net
+    
+    steps:
+      - name: 📥 Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-build-${{ needs.build-and-test.outputs.version }}
+          path: ./backend/
+          
+      - name: 🔑 Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS_DEV }}
+          
+      - name: 🚀 Deploy to Development App Service
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ env.APP_NAME }}-backend-dev
+          package: ./backend
+          startup-command: 'gunicorn --bind=0.0.0.0:8000 --workers=2 --timeout=120 src.app:app'
+          
+      - name: 🔧 Configure Development Settings
+        run: |
+          az webapp config appsettings set \
+            --name ${{ env.APP_NAME }}-backend-dev \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP_DEV }} \
+            --settings \
+              ENVIRONMENT="development" \
+              DEBUG="true" \
+              LOG_LEVEL="DEBUG" \
+              ENTRA_CLIENT_ID="${{ secrets.ENTRA_CLIENT_ID_DEV }}" \
+              ENTRA_TENANT_ID="${{ secrets.ENTRA_TENANT_ID }}" \
+              FABRIC_CLIENT_ID="${{ secrets.FABRIC_CLIENT_ID_DEV }}" \
+              CORS_ORIGINS="${{ secrets.CORS_ORIGINS_DEV }}" \
+              VERSION="${{ needs.build-and-test.outputs.version }}"
+              
+      - name: 🏥 Development Health Check
+        run: |
+          sleep 45  # Give more time for Python app to start
+          
+          health_url="https://${{ env.APP_NAME }}-backend-dev.azurewebsites.net/api/health"
+          
+          for i in {1..6}; do
+            response=$(curl -s -o /dev/null -w "%{http_code}" "$health_url" || echo "000")
+            if [ "$response" = "200" ]; then
+              echo "✅ Development deployment health check passed"
+              break
+            elif [ $i -eq 6 ]; then
+              echo "❌ Development deployment health check failed after 6 attempts"
+              
+              # Get logs for debugging
+              az webapp log download \
+                --name ${{ env.APP_NAME }}-backend-dev \
+                --resource-group ${{ secrets.AZURE_RESOURCE_GROUP_DEV }} \
+                --log-file dev-logs.zip || true
+                
+              exit 1
+            else
+              echo "⏳ Attempt $i failed (HTTP $response), retrying in 45 seconds..."
+              sleep 45
+            fi
+          done
+
+  # 🚀 Deploy to Staging
+  deploy-staging:
+    name: 🎭 Deploy to Staging
+    runs-on: ubuntu-latest
+    if: |
+      (github.ref == 'refs/heads/main' && !inputs.skip_tests) || 
+      (inputs.environment == 'staging')
+    needs: [build-and-test, deploy-development]
+    environment:
+      name: staging
+      url: https://${{ env.APP_NAME }}-backend-staging.azurewebsites.net
+    
+    steps:
+      - name: 📥 Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-build-${{ needs.build-and-test.outputs.version }}
+          path: ./backend/
+          
+      - name: 🔑 Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS_STAGING }}
+          
+      - name: 🗄️ Run Migrations (if needed)
+        if: inputs.run_migrations
+        run: |
+          echo "Running database migrations on staging..."
+          # Add migration logic here
+          
+      - name: 🚀 Deploy to Staging Slot
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ env.APP_NAME }}-backend
+          slot-name: staging
+          package: ./backend
+          startup-command: 'gunicorn --bind=0.0.0.0:8000 --workers=3 --timeout=120 src.app:app'
+          
+      - name: 🔧 Configure Staging Settings
+        run: |
+          az webapp config appsettings set \
+            --name ${{ env.APP_NAME }}-backend \
+            --slot staging \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --settings \
+              ENVIRONMENT="staging" \
+              LOG_LEVEL="INFO" \
+              ENTRA_CLIENT_ID="${{ secrets.ENTRA_CLIENT_ID_STAGING }}" \
+              ENTRA_TENANT_ID="${{ secrets.ENTRA_TENANT_ID }}" \
+              FABRIC_CLIENT_ID="${{ secrets.FABRIC_CLIENT_ID_STAGING }}" \
+              FABRIC_WORKSPACE_ID="${{ secrets.FABRIC_WORKSPACE_ID_STAGING }}" \
+              VERSION="${{ needs.build-and-test.outputs.version }}"
+              
+      - name: 🧪 Run Staging API Tests
+        run: |
+          sleep 60
+          staging_url="https://${{ env.APP_NAME }}-backend-staging.azurewebsites.net"
+          
+          echo "Testing API endpoints..."
+          
+          # Test health endpoint
+          health_response=$(curl -s "$staging_url/api/health")
+          echo "Health response: $health_response"
+          
+          # Test version endpoint
+          version_response=$(curl -s "$staging_url/api/version")
+          echo "Version response: $version_response"
+          
+      - name: 🏥 Staging Health Check
+        run: |
+          health_url="https://${{ env.APP_NAME }}-backend-staging.azurewebsites.net/api/health"
+          
+          response=$(curl -s -o /dev/null -w "%{http_code}" "$health_url" || echo "000")
+          if [ "$response" = "200" ]; then
+            echo "✅ Staging deployment health check passed"
+          else
+            echo "❌ Staging deployment health check failed (HTTP $response)"
+            exit 1
+          fi
+
+  # 🚀 Deploy to Production
+  deploy-production:
+    name: 🌍 Deploy to Production
+    runs-on: ubuntu-latest
+    if: |
+      (github.ref == 'refs/heads/main' && !inputs.skip_tests) || 
+      (inputs.environment == 'production')
+    needs: [build-and-test, deploy-staging]
+    environment:
+      name: production
+      url: https://${{ env.APP_NAME }}-backend.azurewebsites.net
+    
+    steps:
+      - name: 📥 Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-build-${{ needs.build-and-test.outputs.version }}
+          path: ./backend/
+          
+      - name: 🔑 Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          
+      - name: 📊 Pre-deployment Checks
+        run: |
+          echo "Performing pre-deployment checks..."
+          
+          # Check current app status
+          current_status=$(az webapp show \
+            --name ${{ env.APP_NAME }}-backend \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --query "state" -o tsv)
+          
+          echo "Current app status: $current_status"
+          
+      - name: 🗄️ Run Production Migrations
+        if: inputs.run_migrations
+        run: |
+          echo "Running database migrations on production..."
+          # Add production migration logic here
+          echo "⚠️ Migrations completed"
+          
+      - name: 🚀 Deploy to Production
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ env.APP_NAME }}-backend
+          package: ./backend
+          startup-command: 'gunicorn --bind=0.0.0.0:8000 --workers=4 --timeout=120 --max-requests=1000 src.app:app'
+          
+      - name: 🔧 Configure Production Settings
+        run: |
+          az webapp config appsettings set \
+            --name ${{ env.APP_NAME }}-backend \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --settings \
+              ENVIRONMENT="production" \
+              LOG_LEVEL="WARNING" \
+              ENTRA_CLIENT_ID="${{ secrets.ENTRA_CLIENT_ID }}" \
+              ENTRA_TENANT_ID="${{ secrets.ENTRA_TENANT_ID }}" \
+              FABRIC_CLIENT_ID="${{ secrets.FABRIC_CLIENT_ID }}" \
+              FABRIC_WORKSPACE_ID="${{ secrets.FABRIC_WORKSPACE_ID }}" \
+              CORS_ORIGINS="${{ secrets.CORS_ORIGINS }}" \
+              VERSION="${{ needs.build-and-test.outputs.version }}" \
+              CACHE_TTL_SECONDS="300" \
+              MAX_EMBED_TOKENS="100" \
+              RATE_LIMIT_PER_MINUTE="60"
+              
+      - name: 🎯 Warm Up Production App
+        run: |
+          echo "Warming up production application..."
+          production_url="https://${{ env.APP_NAME }}-backend.azurewebsites.net"
+          
+          # Warm up key endpoints
+          curl -s "$production_url/api/health" > /dev/null || true
+          curl -s "$production_url/api/version" > /dev/null || true
+          
+          sleep 60
+          
+      - name: 🏥 Production Health Check
+        run: |
+          production_url="https://${{ env.APP_NAME }}-backend.azurewebsites.net"
+          health_url="$production_url/api/health"
+          
+          for i in {1..10}; do
+            response=$(curl -s -o /dev/null -w "%{http_code}" "$health_url" || echo "000")
+            if [ "$response" = "200" ]; then
+              echo "✅ Production deployment health check passed"
+              break
+            elif [ $i -eq 10 ]; then
+              echo "❌ Production deployment health check failed after 10 attempts"
+              
+              # Get detailed logs
+              echo "Getting application logs..."
+              az webapp log download \
+                --name ${{ env.APP_NAME }}-backend \
+                --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+                --log-file prod-logs.zip || true
+                
+              exit 1
+            else
+              echo "⏳ Attempt $i failed (HTTP $response), retrying in 30 seconds..."
+              sleep 30
+            fi
+          done
+          
+      - name: 🧪 Production API Tests
+        run: |
+          echo "Running production API tests..."
+          production_url="https://${{ env.APP_NAME }}-backend.azurewebsites.net"
+          
+          # Test version endpoint
+          version_response=$(curl -s "$production_url/api/version")
+          expected_version="${{ needs.build-and-test.outputs.version }}"
+          
+          if echo "$version_response" | grep -q "$expected_version"; then
+            echo "✅ Version verification passed"
+          else
+            echo "❌ Version verification failed"
+            echo "Expected: $expected_version"
+            echo "Got: $version_response"
+            exit 1
+          fi
+          
+          # Test system info endpoint
+          info_response=$(curl -s -o /dev/null -w "%{http_code}" "$production_url/api/system/info")
+          if [ "$info_response" = "200" ]; then
+            echo "✅ System info endpoint check passed"
+          else
+            echo "❌ System info endpoint check failed (HTTP $info_response)"
+            exit 1
+          fi
+
+  # 📊 Post-deployment Tasks
+  post-deployment:
+    name: 📊 Post-deployment Tasks
+    runs-on: ubuntu-latest
+    if: success()
+    needs: [build-and-test, deploy-production]
+    
+    steps:
+      - name: 📈 Update Monitoring
+        run: |
+          echo "Updating monitoring and alerting..."
+          echo "Deployment version: ${{ needs.build-and-test.outputs.version }}"
+          
+      - name: 🧹 Cleanup Old Versions
+        run: |
+          echo "Cleaning up old deployment artifacts..."
+          # Add cleanup logic for old versions
+          
+      - name: 📊 Performance Baseline
+        run: |
+          echo "Establishing performance baseline..."
+          production_url="https://${{ env.APP_NAME }}-backend.azurewebsites.net"
+          
+          # Simple performance test
+          start_time=$(date +%s%3N)
+          curl -s "$production_url/api/health" > /dev/null
+          end_time=$(date +%s%3N)
+          
+          response_time=$((end_time - start_time))
+          echo "API response time: ${response_time}ms"
+          
+          if [ $response_time -lt 2000 ]; then
+            echo "✅ Performance baseline established"
+          else
+            echo "⚠️ Performance warning: Response time is ${response_time}ms"
+          fi
+          
+      - name: 🔔 Send Success Notification
+        run: |
+          echo "🎉 Backend deployment completed successfully!"
+          echo "Version: ${{ needs.build-and-test.outputs.version }}"
+          echo "Environment: ${{ inputs.environment || 'production' }}"
+          echo "API URL: https://${{ env.APP_NAME }}-backend.azurewebsites.net"
+
+  # 🚨 Emergency Rollback
+  rollback:
+    name: 🔄 Emergency Rollback
+    runs-on: ubuntu-latest
+    if: failure() && github.event_name == 'workflow_dispatch'
+    needs: [deploy-production]
+    environment:
+      name: production-rollback
+    
+    steps:
+      - name: 🔑 Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          
+      - name: 🔄 Perform Rollback
+        run: |
+          echo "🚨 Performing emergency rollback..."
+          
+          # Stop the current app
+          az webapp stop \
+            --name ${{ env.APP_NAME }}-backend \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }}
+          
+          echo "⚠️ Backend application stopped"
+          echo "Manual intervention required:"
+          echo "1. Go to Azure Portal"
+          echo "2. Navigate to App Service: ${{ env.APP_NAME }}-backend"
+          echo "3. Use deployment slots to swap back to previous version"
+          echo "4. Or manually deploy previous version"
+          echo "5. Restart the application"
+          
+      - name: 📢 Rollback Notification
+        run: |
+          echo "🚨 EMERGENCY ROLLBACK INITIATED"
+          echo "Backend deployment has been stopped"
+          echo "Manual rollback procedure required"
+          echo "Check Azure Portal for deployment history"

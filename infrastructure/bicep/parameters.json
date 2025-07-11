@@ -1,0 +1,226 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "appName": {
+      "value": "fabric-embedded-app"
+    },
+    "location": {
+      "value": "westus3"
+    },
+    "adminEmail": {
+      "value": "admin@yourcompany.com"
+    },
+    "entraClientId": {
+      "value": "YOUR_ENTRA_CLIENT_ID"
+    },
+    "entraTenantId": {
+      "value": "YOUR_ENTRA_TENANT_ID"
+    },
+    "fabricWorkspaceId": {
+      "value": "YOUR_FABRIC_WORKSPACE_ID"
+    },
+    "fabricClientId": {
+      "value": "YOUR_FABRIC_CLIENT_ID"
+    },
+    "appServicePlanSku": {
+      "value": "B1"
+    },
+    "fabricCapacitySku": {
+      "value": "F8"
+    },
+    "enableStagingSlots": {
+      "value": false
+    },
+    "enableAdvancedSecurity": {
+      "value": true
+    },
+    "enableAutoScale": {
+      "value": true
+    },
+    "environment": {
+      "value": "production"
+    },
+    "deploymentConfiguration": {
+      "value": {
+        "deployFabricCapacity": true,
+        "deployAppServices": true,
+        "deployIdentity": true,
+        "deployMonitoring": true,
+        "deployNetworking": false
+      }
+    },
+    "tags": {
+      "value": {
+        "Project": "Microsoft Fabric Embedded",
+        "Environment": "Production",
+        "Owner": "IT Team",
+        "CostCenter": "Analytics",
+        "BusinessUnit": "Data & Analytics",
+        "DeploymentDate": "2025-01-01",
+        "MaintenanceWindow": "Sunday 02:00-04:00 UTC"
+      }
+    },
+    "keyVaultConfig": {
+      "value": {
+        "enableSoftDelete": true,
+        "softDeleteRetentionDays": 90,
+        "enablePurgeProtection": true,
+        "enableRbacAuthorization": false
+      }
+    },
+    "workspaceConfig": {
+      "value": {
+        "name": "fabric-embedded-workspace",
+        "description": "Microsoft Fabric workspace for embedded analytics and reporting"
+      }
+    },
+    "scaleSettings": {
+      "value": {
+        "minCapacity": "F8",
+        "maxCapacity": "F16",
+        "scaleUpThreshold": 80,
+        "scaleDownThreshold": 40
+      }
+    },
+    "frontendEnvVars": {
+      "value": {
+        "VITE_API_BASE_URL": "https://fabric-embedded-app-backend-{uniqueSuffix}.azurewebsites.net",
+        "VITE_ENTRA_CLIENT_ID": "YOUR_ENTRA_CLIENT_ID",
+        "VITE_ENTRA_TENANT_ID": "YOUR_ENTRA_TENANT_ID",
+        "VITE_ENTRA_REDIRECT_URI": "https://fabric-embedded-app-frontend-{uniqueSuffix}.azurewebsites.net",
+        "VITE_POWERBI_WORKSPACE_ID": "YOUR_FABRIC_WORKSPACE_ID",
+        "VITE_ENABLE_ANALYTICS": "true",
+        "VITE_ENABLE_DEBUG": "false",
+        "VITE_ENABLE_EXPORT": "true",
+        "VITE_ENABLE_FULLSCREEN": "true",
+        "VITE_ENABLE_AUTO_REFRESH": "true",
+        "VITE_APP_URL": "https://fabric-embedded-app-frontend-{uniqueSuffix}.azurewebsites.net",
+        "CUSTOM_DOMAIN": ""
+      }
+    },
+    "backendEnvVars": {
+      "value": {
+        "ENTRA_CLIENT_ID": "YOUR_ENTRA_CLIENT_ID",
+        "ENTRA_TENANT_ID": "YOUR_ENTRA_TENANT_ID",
+        "FABRIC_WORKSPACE_ID": "YOUR_FABRIC_WORKSPACE_ID",
+        "FABRIC_CLIENT_ID": "YOUR_FABRIC_CLIENT_ID",
+        "AZURE_KEY_VAULT_URL": "https://fabric-embedded-app-kv-{uniqueSuffix}.vault.azure.net/",
+        "CORS_ORIGINS": "https://fabric-embedded-app-frontend-{uniqueSuffix}.azurewebsites.net,https://app.powerbi.com,https://app.fabric.microsoft.com",
+        "JWT_ALGORITHM": "HS256",
+        "JWT_EXPIRATION_HOURS": "24",
+        "LOG_LEVEL": "INFO",
+        "ENVIRONMENT": "production",
+        "DATABASE_TYPE": "sqlite",
+        "CACHE_TTL_SECONDS": "300",
+        "MAX_EMBED_TOKENS": "100",
+        "RATE_LIMIT_PER_MINUTE": "60"
+      }
+    },
+    "alertConfiguration": {
+      "value": {
+        "enableCostAlerts": true,
+        "enablePerformanceAlerts": true,
+        "enableSecurityAlerts": true,
+        "alertEmailRecipients": [
+          "admin@yourcompany.com",
+          "devops@yourcompany.com"
+        ],
+        "budgetAmount": 500,
+        "budgetThresholds": [
+          80,
+          100
+        ]
+      }
+    },
+    "backupConfiguration": {
+      "value": {
+        "enableBackups": true,
+        "backupRetentionDays": 30,
+        "backupFrequency": "Daily",
+        "backupStartTime": "02:00"
+      }
+    },
+    "securityConfiguration": {
+      "value": {
+        "enableWAF": false,
+        "enableDDoSProtection": false,
+        "allowedIpRanges": [],
+        "enableAuditLogs": true,
+        "logRetentionDays": 365,
+        "enableThreatDetection": true
+      }
+    },
+    "performanceConfiguration": {
+      "value": {
+        "enableAutoScale": true,
+        "minInstances": 1,
+        "maxInstances": 3,
+        "scaleUpCpuThreshold": 70,
+        "scaleDownCpuThreshold": 30,
+        "enableCDN": false,
+        "enableApplicationGateway": false
+      }
+    },
+    "developmentConfiguration": {
+      "value": {
+        "enableStagingSlots": false,
+        "enableDebugMode": false,
+        "enableHotSwap": true,
+        "enableSourceControl": true,
+        "repositoryUrl": "https://github.com/yourcompany/fabric-embedded-app",
+        "branch": "main"
+      }
+    },
+    "complianceConfiguration": {
+      "value": {
+        "enableDataEncryption": true,
+        "enablePrivateEndpoints": false,
+        "enableVNetIntegration": false,
+        "dataResidencyRegion": "westus3",
+        "enableGDPRCompliance": true,
+        "enableHIPAACompliance": false
+      }
+    },
+    "integrationConfiguration": {
+      "value": {
+        "enableEventGrid": false,
+        "enableServiceBus": false,
+        "enableLogicApps": false,
+        "enablePowerAutomate": true,
+        "enableAPIManagement": false,
+        "enableAzureFunctions": false
+      }
+    },
+    "monitoringConfiguration": {
+      "value": {
+        "enableApplicationInsights": true,
+        "enableLogAnalytics": true,
+        "enableAzureMonitor": true,
+        "enableCustomDashboards": true,
+        "retentionPeriodDays": 90,
+        "samplingPercentage": 100,
+        "enableLiveMetrics": true,
+        "enableAvailabilityTests": true
+      }
+    },
+    "costOptimization": {
+      "value": {
+        "enableAutoPause": true,
+        "autoPauseDelayMinutes": 60,
+        "enableScheduledScaling": true,
+        "businessHoursStart": "08:00",
+        "businessHoursEnd": "18:00",
+        "businessDays": [
+          "Monday",
+          "Tuesday", 
+          "Wednesday",
+          "Thursday",
+          "Friday"
+        ],
+        "enableReservedInstances": false,
+        "enableSpotInstances": false
+      }
+    }
+  }
+}

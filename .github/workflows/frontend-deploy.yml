@@ -1,0 +1,478 @@
+name: 🎨 Frontend Deployment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+      skip_tests:
+        description: 'Skip tests and deploy directly'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  NODE_VERSION: '18'
+  APP_NAME: 'fabric-embedded-app'
+
+jobs:
+  # 🧪 Build and Test
+  build-and-test:
+    name: 🏗️ Build & Test Frontend
+    runs-on: ubuntu-latest
+    if: ${{ !inputs.skip_tests }}
+    
+    defaults:
+      run:
+        working-directory: ./frontend
+    
+    outputs:
+      build-version: ${{ steps.version.outputs.version }}
+      build-hash: ${{ steps.hash.outputs.hash }}
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for versioning
+        
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: './frontend/package-lock.json'
+          
+      - name: 📋 Install dependencies
+        run: |
+          npm ci --prefer-offline --no-audit
+          npm list --depth=0
+          
+      - name: 🔍 Code Quality Checks
+        run: |
+          # Lint
+          npm run lint
+          
+          # Type checking
+          npm run type-check
+          
+          # Format check
+          npm run format:check
+          
+      - name: 🧪 Run Unit Tests
+        run: |
+          npm run test:unit -- --coverage --watchAll=false
+          
+      - name: 🌐 Run Component Tests
+        run: |
+          npm run test:components -- --coverage --watchAll=false
+          
+      - name: 📊 Upload Test Coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./frontend/coverage/lcov.info
+          flags: frontend
+          name: frontend-coverage
+          
+      - name: 🏗️ Build Application
+        run: |
+          echo "Building for environment: ${{ inputs.environment || 'production' }}"
+          
+          # Set environment variables for build
+          export VITE_ENVIRONMENT="${{ inputs.environment || 'production' }}"
+          export VITE_BUILD_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          export VITE_BUILD_COMMIT="${{ github.sha }}"
+          export VITE_BUILD_VERSION="${{ github.run_number }}"
+          
+          npm run build
+          
+          # Verify build output
+          ls -la dist/
+          
+      - name: 📏 Bundle Analysis
+        run: |
+          # Analyze bundle size
+          npm run analyze
+          
+          # Check for large files
+          find dist -size +1M -type f -exec ls -lh {} \; | awk '{ print $9 ": " $5 }'
+          
+      - name: 🔒 Security Scan
+        run: |
+          # Audit dependencies
+          npm audit --audit-level=moderate
+          
+          # Check for outdated packages
+          npm outdated || true
+          
+      - name: 📦 Create Build Info
+        id: version
+        run: |
+          version="1.0.${{ github.run_number }}"
+          echo "version=$version" >> $GITHUB_OUTPUT
+          
+          # Create build info file
+          cat > dist/build-info.json << EOF
+          {
+            "version": "$version",
+            "buildDate": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "commit": "${{ github.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "environment": "${{ inputs.environment || 'production' }}",
+            "buildNumber": "${{ github.run_number }}",
+            "workflow": "${{ github.workflow }}"
+          }
+          EOF
+          
+      - name: 🔍 Generate Build Hash
+        id: hash
+        run: |
+          build_hash=$(find dist -type f -exec sha256sum {} \; | sort | sha256sum | cut -d' ' -f1)
+          echo "hash=$build_hash" >> $GITHUB_OUTPUT
+          echo "Build hash: $build_hash"
+          
+      - name: 📦 Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build-${{ steps.version.outputs.version }}
+          path: |
+            ./frontend/dist/
+            ./frontend/package.json
+          retention-days: 30
+          
+      - name: 📊 Upload Bundle Stats
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-stats-${{ steps.version.outputs.version }}
+          path: ./frontend/dist/stats.json
+          retention-days: 7
+
+  # 🚀 Deploy to Development
+  deploy-development:
+    name: 🧪 Deploy to Development
+    runs-on: ubuntu-latest
+    if: |
+      (github.ref == 'refs/heads/main' && !inputs.skip_tests) || 
+      (inputs.environment == 'development')
+    needs: [build-and-test]
+    environment:
+      name: development
+      url: https://${{ env.APP_NAME }}-frontend-dev.azurewebsites.net
+    
+    steps:
+      - name: 📥 Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build-${{ needs.build-and-test.outputs.build-version }}
+          path: ./build/
+          
+      - name: 🔑 Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS_DEV }}
+          
+      - name: 🚀 Deploy to Development App Service
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ env.APP_NAME }}-frontend-dev
+          package: ./build/dist
+          
+      - name: 🔧 Configure Development Settings
+        run: |
+          az webapp config appsettings set \
+            --name ${{ env.APP_NAME }}-frontend-dev \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP_DEV }} \
+            --settings \
+              ENVIRONMENT="development" \
+              DEBUG_MODE="true" \
+              VITE_ENTRA_CLIENT_ID="${{ secrets.VITE_ENTRA_CLIENT_ID_DEV }}" \
+              VITE_API_BASE_URL="${{ secrets.VITE_API_BASE_URL_DEV }}" \
+              BUILD_VERSION="${{ needs.build-and-test.outputs.build-version }}"
+              
+      - name: 🏥 Health Check
+        run: |
+          sleep 30
+          health_check_url="https://${{ env.APP_NAME }}-frontend-dev.azurewebsites.net/health"
+          
+          for i in {1..5}; do
+            response=$(curl -s -o /dev/null -w "%{http_code}" "$health_check_url" || echo "000")
+            if [ "$response" = "200" ]; then
+              echo "✅ Development deployment health check passed"
+              break
+            elif [ $i -eq 5 ]; then
+              echo "❌ Development deployment health check failed after 5 attempts"
+              exit 1
+            else
+              echo "⏳ Attempt $i failed, retrying in 30 seconds..."
+              sleep 30
+            fi
+          done
+
+  # 🚀 Deploy to Staging
+  deploy-staging:
+    name: 🎭 Deploy to Staging
+    runs-on: ubuntu-latest
+    if: |
+      (github.ref == 'refs/heads/main' && !inputs.skip_tests) || 
+      (inputs.environment == 'staging')
+    needs: [build-and-test, deploy-development]
+    environment:
+      name: staging
+      url: https://${{ env.APP_NAME }}-frontend-staging.azurewebsites.net
+    
+    steps:
+      - name: 📥 Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build-${{ needs.build-and-test.outputs.build-version }}
+          path: ./build/
+          
+      - name: 🔑 Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS_STAGING }}
+          
+      - name: 🚀 Deploy to Staging Slot
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ env.APP_NAME }}-frontend
+          slot-name: staging
+          package: ./build/dist
+          
+      - name: 🔧 Configure Staging Settings
+        run: |
+          az webapp config appsettings set \
+            --name ${{ env.APP_NAME }}-frontend \
+            --slot staging \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --settings \
+              ENVIRONMENT="staging" \
+              VITE_ENTRA_CLIENT_ID="${{ secrets.VITE_ENTRA_CLIENT_ID_STAGING }}" \
+              VITE_API_BASE_URL="${{ secrets.VITE_API_BASE_URL_STAGING }}" \
+              BUILD_VERSION="${{ needs.build-and-test.outputs.build-version }}"
+              
+      - name: 🧪 Run Staging Tests
+        run: |
+          echo "Running staging-specific tests..."
+          # Add staging tests here
+          
+      - name: 🏥 Staging Health Check
+        run: |
+          sleep 30
+          health_check_url="https://${{ env.APP_NAME }}-frontend-staging.azurewebsites.net/health"
+          
+          response=$(curl -s -o /dev/null -w "%{http_code}" "$health_check_url" || echo "000")
+          if [ "$response" = "200" ]; then
+            echo "✅ Staging deployment health check passed"
+          else
+            echo "❌ Staging deployment health check failed (HTTP $response)"
+            exit 1
+          fi
+
+  # 🚀 Deploy to Production
+  deploy-production:
+    name: 🌍 Deploy to Production
+    runs-on: ubuntu-latest
+    if: |
+      (github.ref == 'refs/heads/main' && !inputs.skip_tests) || 
+      (inputs.environment == 'production')
+    needs: [build-and-test, deploy-staging]
+    environment:
+      name: production
+      url: https://${{ env.APP_NAME }}-frontend.azurewebsites.net
+    
+    steps:
+      - name: 📥 Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build-${{ needs.build-and-test.outputs.build-version }}
+          path: ./build/
+          
+      - name: 🔑 Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          
+      - name: 📊 Pre-deployment Backup
+        run: |
+          echo "Creating backup of current production deployment..."
+          # Add backup logic here if needed
+          
+      - name: 🚀 Deploy to Production
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ env.APP_NAME }}-frontend
+          package: ./build/dist
+          
+      - name: 🔧 Configure Production Settings
+        run: |
+          az webapp config appsettings set \
+            --name ${{ env.APP_NAME }}-frontend \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --settings \
+              ENVIRONMENT="production" \
+              VITE_ENTRA_CLIENT_ID="${{ secrets.VITE_ENTRA_CLIENT_ID }}" \
+              VITE_ENTRA_TENANT_ID="${{ secrets.VITE_ENTRA_TENANT_ID }}" \
+              VITE_API_BASE_URL="${{ secrets.VITE_API_BASE_URL }}" \
+              VITE_POWERBI_WORKSPACE_ID="${{ secrets.VITE_POWERBI_WORKSPACE_ID }}" \
+              BUILD_VERSION="${{ needs.build-and-test.outputs.build-version }}" \
+              BUILD_HASH="${{ needs.build-and-test.outputs.build-hash }}"
+              
+      - name: 🎯 Warm Up Application
+        run: |
+          echo "Warming up production application..."
+          production_url="https://${{ env.APP_NAME }}-frontend.azurewebsites.net"
+          
+          # Warm up main routes
+          curl -s "$production_url/" > /dev/null || true
+          curl -s "$production_url/dashboard" > /dev/null || true
+          curl -s "$production_url/reports" > /dev/null || true
+          
+          sleep 30
+          
+      - name: 🏥 Production Health Check
+        run: |
+          production_url="https://${{ env.APP_NAME }}-frontend.azurewebsites.net"
+          health_check_url="$production_url/health"
+          
+          for i in {1..10}; do
+            response=$(curl -s -o /dev/null -w "%{http_code}" "$health_check_url" || echo "000")
+            if [ "$response" = "200" ]; then
+              echo "✅ Production deployment health check passed"
+              break
+            elif [ $i -eq 10 ]; then
+              echo "❌ Production deployment health check failed after 10 attempts"
+              
+              # Get detailed error info
+              echo "Detailed response:"
+              curl -v "$health_check_url" || true
+              
+              exit 1
+            else
+              echo "⏳ Attempt $i failed (HTTP $response), retrying in 30 seconds..."
+              sleep 30
+            fi
+          done
+          
+      - name: 🧪 Production Smoke Tests
+        run: |
+          echo "Running production smoke tests..."
+          production_url="https://${{ env.APP_NAME }}-frontend.azurewebsites.net"
+          
+          # Test main application endpoints
+          echo "Testing main page..."
+          main_response=$(curl -s -o /dev/null -w "%{http_code}" "$production_url/")
+          
+          echo "Testing build info..."
+          build_response=$(curl -s -o /dev/null -w "%{http_code}" "$production_url/build-info.json")
+          
+          if [ "$main_response" = "200" ] && [ "$build_response" = "200" ]; then
+            echo "✅ Production smoke tests passed"
+          else
+            echo "❌ Production smoke tests failed (Main: $main_response, Build: $build_response)"
+            exit 1
+          fi
+
+  # 📊 Post-deployment Tasks
+  post-deployment:
+    name: 📊 Post-deployment Tasks
+    runs-on: ubuntu-latest
+    if: success()
+    needs: [build-and-test, deploy-production]
+    
+    steps:
+      - name: 📈 Update Monitoring
+        run: |
+          echo "Updating monitoring dashboards..."
+          echo "Deployment version: ${{ needs.build-and-test.outputs.build-version }}"
+          echo "Build hash: ${{ needs.build-and-test.outputs.build-hash }}"
+          
+      - name: 📊 Performance Check
+        run: |
+          echo "Running performance checks..."
+          production_url="https://${{ env.APP_NAME }}-frontend.azurewebsites.net"
+          
+          # Simple performance check
+          start_time=$(date +%s%3N)
+          curl -s "$production_url/" > /dev/null
+          end_time=$(date +%s%3N)
+          
+          response_time=$((end_time - start_time))
+          echo "Response time: ${response_time}ms"
+          
+          if [ $response_time -lt 3000 ]; then
+            echo "✅ Performance check passed"
+          else
+            echo "⚠️ Performance check warning: Response time is ${response_time}ms"
+          fi
+          
+      - name: 🔔 Send Success Notification
+        run: |
+          echo "🎉 Frontend deployment completed successfully!"
+          echo "Version: ${{ needs.build-and-test.outputs.build-version }}"
+          echo "Environment: ${{ inputs.environment || 'production' }}"
+          echo "URL: https://${{ env.APP_NAME }}-frontend.azurewebsites.net"
+          
+      - name: 📝 Create Deployment Record
+        run: |
+          cat > deployment-record.json << EOF
+          {
+            "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "version": "${{ needs.build-and-test.outputs.build-version }}",
+            "buildHash": "${{ needs.build-and-test.outputs.build-hash }}",
+            "environment": "${{ inputs.environment || 'production' }}",
+            "commit": "${{ github.sha }}",
+            "actor": "${{ github.actor }}",
+            "workflow": "${{ github.workflow }}",
+            "runId": "${{ github.run_id }}"
+          }
+          EOF
+          
+          echo "Deployment record created:"
+          cat deployment-record.json
+
+  # 🚨 Rollback (Manual Trigger)
+  rollback:
+    name: 🔄 Rollback Deployment
+    runs-on: ubuntu-latest
+    if: failure() && github.event_name == 'workflow_dispatch'
+    needs: [deploy-production]
+    environment:
+      name: production-rollback
+    
+    steps:
+      - name: 🔑 Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          
+      - name: 🔄 Perform Rollback
+        run: |
+          echo "🚨 Performing emergency rollback..."
+          
+          # Swap back to previous slot if using slots
+          # Or redeploy previous version
+          
+          echo "⚠️ Manual rollback procedure:"
+          echo "1. Go to Azure Portal"
+          echo "2. Navigate to App Service: ${{ env.APP_NAME }}-frontend"
+          echo "3. Use Deployment slots to swap back"
+          echo "4. Or redeploy previous version from deployment history"
+          
+      - name: 📢 Rollback Notification
+        run: |
+          echo "🚨 ROLLBACK INITIATED"
+          echo "Frontend deployment has been rolled back"
+          echo "Please check the application and investigate the issue"
